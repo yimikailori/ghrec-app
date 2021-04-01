@@ -1,1 +1,0 @@
-(do (clojure.core/ns ghas-acs.servlet (:gen-class :extends javax.servlet.http.HttpServlet)) (def service-method) (clojure.core/defn -service [servlet__1361__auto__ request__1362__auto__ response__1363__auto__] (service-method servlet__1361__auto__ request__1362__auto__ response__1363__auto__)))

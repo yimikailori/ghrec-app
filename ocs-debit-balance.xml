@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
+                  xmlns:bcs="http://www.huawei.com/bme/cbsinterface/bcservices"
+                  xmlns:cbs="http://www.huawei.com/bme/cbsinterface/cbscommon"
+                  xmlns:bcc="http://www.huawei.com/bme/cbsinterface/bccommon">
+    <soapenv:Header/>
+    <soapenv:Body>
+        <bcs:FeeDeductionRequestMsg>
+            <RequestHeader>
+                <cbs:Version>1</cbs:Version>
+                <!--Optional:-->
+                <cbs:BusinessCode>FeeDeduction</cbs:BusinessCode>
+                <cbs:MessageSeq>FeeDeduction001</cbs:MessageSeq>
+                <!--Optional:-->
+                <cbs:OwnershipInfo>
+                    <cbs:BEID>101</cbs:BEID>
+                </cbs:OwnershipInfo>
+                <cbs:AccessSecurity>
+                    <cbs:LoginSystemCode>%s</cbs:LoginSystemCode>
+                    <cbs:Password>%s</cbs:Password>
+                </cbs:AccessSecurity>
+                <!--Optional:-->
+                <cbs:OperatorInfo>
+                    <cbs:OperatorID>%s</cbs:OperatorID>
+                </cbs:OperatorInfo>
+            </RequestHeader>
+            <FeeDeductionRequest>
+                <!--Optional:-->
+                <bcs:DeductSerialNo>%s</bcs:DeductSerialNo>
+                <bcs:DeductObj>
+                    <!--You have a CHOICE of the next 4 items at this level-->
+                    <bcs:SubAccessCode>
+                        <!--You have a CHOICE of the next 2 items at this level-->
+                        <bcc:SubscriberKey>%s</bcc:SubscriberKey>
+                    </bcs:SubAccessCode>
+                </bcs:DeductObj>
+                <!--Zero or more repetitions:-->
+                <bcs:DeductInfo>
+                    <bcs:ChargeCode>C_VOICE_CHARGECODE</bcs:ChargeCode>
+                    <bcs:ChargeAmt>%s</bcs:ChargeAmt>
+                    <bcs:CurrencyID>1049</bcs:CurrencyID>
+                </bcs:DeductInfo>
+            </FeeDeductionRequest>
+        </bcs:FeeDeductionRequestMsg>
+    </soapenv:Body>
+</soapenv:Envelope>

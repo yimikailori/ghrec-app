@@ -1,4 +1,4 @@
-# ghas-acs
+# ghrec-acs
 
 FIXME
 

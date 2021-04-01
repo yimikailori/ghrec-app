@@ -1,8 +1,8 @@
-(defproject ghas-acs "0.1.0-SNAPSHOT"
+(defproject ghrec-acs "0.1.0-SNAPSHOT"
   :description "FIXME: write description"
   :url "http://example.com/FIXME"
   :min-lein-version "2.0.0"
-  :dependencies [[org.clojure/clojure "1.10.0"]
+  :dependencies [[org.clojure/clojure "1.10.3"]
                  [compojure "1.6.1"]
                  [ring/ring-defaults "0.3.2"]
 
@@ -22,21 +22,23 @@
                  [aero "1.1.6"]
                  [mount "0.1.16"]
                  [hikari-cp "2.13.0"]
-                 [seancorfield/next.jdbc "1.1.613"]]
+                 [seancorfield/next.jdbc "1.1.613"]
+                 [com.climate/claypoole "1.1.4"]
+                 [necessary-evil "2.0.2"]]
 
   :source-paths ["src"]
   :test-paths ["test"]
   :resource-paths ["resources"]
   :target-path "target/%s/"
-  :main ^:skip-aot ghas-acs.handler
+  :main ^:skip-aot ghrec-acs.handler
 
   :plugins [[lein-ring "0.12.5"]
             [lein-uberwar "0.2.0"]]
-  :ring {:handler ghas-acs.handler/app}
-  :uberwar {:handler ghas-acs.handler/app
-            :init ghas-acs.handler/init-app
-            :destroy ghas-acs.handler/destroy
-            :name "as.war"}
+  :ring {:handler ghrec-acs.handler/app}
+  :uberwar {:handler ghrec-acs.handler/app
+            :init ghrec-acs.handler/init-app
+            :destroy ghrec-acs.handler/destroy
+            :name "recovery.war"}
   :profiles
   {:dev {:dependencies [[javax.servlet/servlet-api "2.5"]
                         [ring/ring-mock "0.3.2"]]}
