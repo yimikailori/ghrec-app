@@ -9,10 +9,10 @@
 		[clojure.data.json :as json]
 		[clojure.zip :as zip])
 	(:import (java.nio.file FileSystem
-													FileSystems
-													Files
-													Path)
-					 java.nio.charset.Charset))
+							FileSystems
+							Files
+							Path)
+			 java.nio.charset.Charset))
 
 ;
 
@@ -88,11 +88,11 @@
 			start-time# (System/currentTimeMillis)
 			e-handler# (fn [err# fname#] (log/errorf err# "!%s -> %s" fname# (.getMessage err#)) :error)
 			return-val# (try
-										~@body
-										(catch Exception se#
-											(if (fn? ~fn-on-failure)
-												(~fn-on-failure se#)
-												(e-handler# se# fn-name#))))]
+							~@body
+							(catch Exception se#
+								(if (fn? ~fn-on-failure)
+									(~fn-on-failure se#)
+									(e-handler# se# fn-name#))))]
 		 (log/infof "callProf|%s|%s -> %s" (- (System/currentTimeMillis) start-time#) fn-name# (if (= ~tag "getSweepLoans") (count return-val#) return-val#))
 		 return-val#))
 

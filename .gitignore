@@ -9,3 +9,5 @@ pom.xml.asc
 /.nrepl-port
 /.idea
 /logs
+/target/**
+ghrec-acs.iml

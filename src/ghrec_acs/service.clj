@@ -68,7 +68,6 @@
 	[ch {:keys [delivery-tag] :as meta} ^bytes payload]
 	(let [payload (json/read-str (String. payload "UTF-8") :key-fn keyword)
 		  {:keys [sub amount time attempts time-queued type]} payload
-
 		  sub     (utils/submsisdn sub)
 		  channel (:channel @send-recovery-details)]
 		(log/debugf "[recovery consumer] payload: %s, delivery tag: %d, -> %s"
@@ -88,16 +87,15 @@
 	(let [sms-sender-name (format (get-in env [:recovery-messge :sms-sender-name]))
 		  msg             (if (= type :full)
 							  (format (get-in env [:recovery-messge :sms-full]) amount)
-							  (format (get-in env [:recovery-messge :sms-partial]) amount owe))]
+							  (format (get-in env [:recovery-messge :sms-partial]) amount owe))
+		  sms-payload (if (not (empty? sms-sender-name))
+						  {:msisdn  subscriber :id request-id :message msg :flash? false :from sms-sender-name}
+						  {:msisdn  subscriber :id request-id :message msg :flash? false})]
 		(log/infof "sendSMS(%s,%s,%s,%s) -> %s" request-id subscriber type amount msg)
 		(try
 			;(json/write-str {:sub subscriber :amount amount :time time
 			;                                                          :attempts 0 :time-queued (System/currentTimeMillis) :type type})
-			(rmqutils/initialize-rabbitmq (assoc @send-sms-details :msg (json/write-str {:msisdn  subscriber
-																						 :id      request-id
-																						 :message msg
-																						 :flash?  false
-																						 :from    sms-sender-name})))
+			(rmqutils/initialize-rabbitmq (assoc @send-sms-details :msg (json/write-str sms-payload)))
 
 			(catch Exception ex
 				(log/errorf ex "cannotSendSMS(%s,%s,%s,%s) -> %s" request-id subscriber type amount (.getMessage ex))))))
@@ -129,8 +127,7 @@
 		  trigger-time       (f/unparse
 								 (f/formatter "yyyy-MM-dd HH:mm:ss") (f/parse custom-formatter recharge-time))
 		  known-event-source #{:cdr :manual :cci}
-		  _                  (log/infof "cdr-recover-parameters (subscriber=%s,
-       trigger-time=%s, recharge-time=%s,trigger-amount= %s,event-source=%s)" subscriber trigger-time recharge-time
+		  _                  (log/infof "cdr-recover-parameters (subscriber=%s,trigger-time=%s, recharge-time=%s,trigger-amount= %s,event-source=%s)" subscriber trigger-time recharge-time
 								 trigger-amount event-source)]
 		(if (known-event-source event-source)
 			(let [records (db/get-recovery-candidates {:sub subscriber :time trigger-time})
@@ -166,46 +163,57 @@
 (defn run-sweep-recovery [thread-pool batch-size]
 	(utils/with-func-timed "runSweep" []
 		(let [tuples (utils/with-func-timed "getSweepLoans" []
-						 (into [] (db/get-sweep-candidates {:batch_size batch-size})))]
-			(log/infof "toSweep(%d)" (count tuples))
-			(run-recovery :sweep tuples thread-pool {:thread-name "thread-sweep"}))))
-
-
-(defn unlock [subscriber]
-	(swap! locked-account-numbers disj subscriber)
-	(log/infof "unlockAccount(%s)" subscriber))
+						 (into [] (db/get-sweep-candidates {:batch_size batch-size})))
+			  tcount (count tuples)]
+			(when (> tcount 0)
+				(run-recovery :sweep tuples thread-pool {:thread-name "thread-sweep"})))))
 
 
 
+(def present  (atom 0))
 (defn- run-recovery [event-source tuples thread-pool & args]
 	(when (not (= event-source :sweep)) (log/debugf "RunRecovery -> [event-source=%s,tuples=%s,thread-pool=%s,args=%s]" event-source tuples thread-pool args))
 	(when tuples
-		(let [subscriber        (:subscriber (first tuples))
-			  locked-subscriber (if (lock-subscriber-number subscriber)
-									tuples
-									(do (log/infof "alreadyDropLockedAcc(%s)" subscriber)
-										[]))]
+		(let [locked-subscriber (loop [x (first tuples)
+									   xs (next tuples)
+									   result []]
+									(let [subscriber (x :subscriber)
+										  result (if (lock-subscriber-number subscriber)
+													 (do
+														 (reset! present 1)
+														 (conj result x))
+													 (do
+														 (if (= @present 1)
+															 (conj result x)
+															 (log/debug (str "alreadyLockedAcc(" subscriber ")")))
+														 result))]
+										(if xs
+											(recur (first xs) (next xs) result)
+											result)))
+			  _ (reset! present 0)]
 			(if thread-pool
 				(cp/with-shutdown! [pool (cp/threadpool thread-pool :name (or (:thread-name args) "thread-pool"))]
-					(->> locked-subscriber
+					(->> [locked-subscriber]
 						(cp/pmap pool %attempt-and-log)
 						doall))
-				(doseq [tuple locked-subscriber]
-					(utils/with-func-timed "attemptRecovery-chunks" [(:loanid tuple) (:subscriber tuple) args]
-						(%attempt-and-log event-source tuples args)))))))
+				(utils/with-func-timed "attemptRecovery-chunks" []
+					(%attempt-and-log event-source locked-subscriber)))
+			(count locked-subscriber))))
 
 
 (defn %attempt-and-log
 	([tuple]
-	 (%attempt-and-log :sweep tuple nil))
-	([event-source tuple & args]
+	 (%attempt-and-log :sweep tuple))
+	([event-source tuple]
 	(try
-		(attempt-recovery event-source tuple args)
+		(attempt-recovery event-source tuple)
 		(finally
-			(do
+			(doseq [acc tuple]
 				(when (= :sweep event-source)
-					(db/update-last-recovery-attempt {:loan_id (:loanid tuple)}))
-				(unlock (:subscriber (tuple 0))))))))
+					(let [loanid (or (:loanid acc) (:loan_id acc))]
+						(db/update-last-recovery-attempt {:loan_id loanid})))
+				(swap! locked-account-numbers disj (:subscriber acc))
+				(log/infof "unlockAccount(%s)" (:subscriber acc)))))))
 
 
 (let [+recovery-methods+  {:cdr 1 :sweep 2 :retry 3 :manual 4 :cci 5}
@@ -288,14 +296,17 @@
 
 (defn- attempt-recovery [event-source loaninfo & args]
 	(swap! counters/countof-recovery-attempts inc)
-	(try
-		(let [counter (atom 1)]
-			(log/infof "attemptingRecovery %s" loaninfo)
-			(doseq [loan-info loaninfo]
-				(log/infof "SingleLoan Processing [%s -> %s]" @counter loan-info)
-				(swap! counter inc)
-				(let [{:keys [loanid subscriber loantype loaned paid trigger_event_time]} loan-info
-					  loan_type (keyword loantype)]
+	(let [counter (atom 1)]
+		(log/infof "attemptingRecovery %s" loaninfo)
+		(doseq [loan-info loaninfo]
+			(log/infof "SingleLoan Processing [%s -> %s]" @counter loan-info)
+			(swap! counter inc)
+			(try
+				(let [{:keys [loanid loan_id subscriber cedis_paid cedis_loaned loantype loaned paid trigger_event_time loan_time]} loan-info
+					  loan_type (keyword loantype)
+					  loanid (or loanid loan_id)
+					  loaned (or loaned cedis_loaned)
+					  paid (or paid cedis_paid)]
 					(log/info (condp = event-source
 								  :sweep (format "sweepRecovery(id=%s,sub=%s)" loanid subscriber)
 								  (format "Recovery %s(event-source=%s,id=%s,sub=%s,typ=%s,time=%s)" event-source
@@ -312,7 +323,7 @@
 																				  :paid         paid
 																				  :to-recover   delta
 																				  ;; Counters
-																				 })]
+																				  })]
 											  (log/info (str "return from account debit = " return-from-recovery))
 											  return-from-recovery))]
 						(if (= (biginteger ma-balance) 0)
@@ -337,8 +348,8 @@
 											  :mismatch (log/errorf "OCS balance mismatch needs reconcilation %s" details)
 											  :loan-bal-changed (log/errorf "loan-bal-changed needs reconcilation %s" details)
 											  :low-balance (log/errorf "loan-balance %s" details)
-											  (log/errorf "OCS general error => %s|%s" error-class details)))))))))
-		(catch Exception e
-			(log/error (format "recoveryError() -> %s" (.getMessage e)) e))))
+											  (log/errorf "OCS general error => %s|%s" error-class details)))))))
+				(catch Exception e
+					(log/error (format "recoveryError() -> %s" (.getMessage e)) e))))))
 
 
