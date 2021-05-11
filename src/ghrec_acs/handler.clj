@@ -1,16 +1,17 @@
 (ns ghrec-acs.handler
-  (:require [compojure.core :refer :all]
-            [compojure.route :as route]
-            [mount.core :as mount]
-            [ring.middleware.defaults :refer [wrap-defaults api-defaults]]
-            [ghrec-acs.db :as db :refer [*db*]]
-            [ghrec-acs.config :refer [env]]
-            [ghrec-acs.service :as service]
-            [clojure.tools.logging :as log]
-            [ghrec-acs.utils :as utils]
-            [ghrec-acs.rmqutils :as rmqutils]
-            [clojure.data.json :as json]
-            [ghrec-acs.counters :as counters])
+    (:require [compojure.core :refer :all]
+              [compojure.route :as route]
+              [mount.core :as mount]
+              [ring.middleware.defaults :refer [wrap-defaults api-defaults]]
+              [ghrec-acs.db :as db :refer [*db*]]
+              [ghrec-acs.config :refer [env]]
+              [ghrec-acs.service :as service]
+              [clojure.tools.logging :as log]
+              [ghrec-acs.utils :as utils]
+              [ghrec-acs.rmqutils :as rmqutils]
+              [clojure.data.json :as json]
+              [ghrec-acs.counters :as counters]
+              [clojure.core.async :as async])
   (:import (java.util Timer TimerTask Date)))
 
 
@@ -46,7 +47,7 @@
                              (let [args  (json/write-str {:sub subscriber :amount amount :time time
                                                           :attempts 0 :time-queued (System/currentTimeMillis) :type type})]
                                (log/debugf "sendRechargeNotification(%s)" args)
-                               (rmqutils/initialize-rabbitmq (assoc @service/send-recovery-details :msg args))
+                               (async/go (rmqutils/initialize-rabbitmq (assoc @service/send-recovery-details :msg args)))
                                  {:status 200
                                   :headers {"Content-Type" "text/plain"}
                                   :body "ok"}))

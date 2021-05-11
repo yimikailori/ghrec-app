@@ -181,7 +181,9 @@
 										  result (if (lock-subscriber-number subscriber)
 													 (do
 														 (reset! present 1)
-														 (conj result x))
+														 (if (not (= event-source :sweep))
+															 tuples
+															 (conj result x)))
 													 (do
 														 (if (= @present 1)
 															 (conj result x)
@@ -309,7 +311,7 @@
 					  paid (or paid cedis_paid)]
 					(log/info (condp = event-source
 								  :sweep (format "sweepRecovery(id=%s,sub=%s)" loanid subscriber)
-								  (format "Recovery %s(event-source=%s,id=%s,sub=%s,typ=%s,time=%s)" event-source
+								  (format "Recovery (event-source=%s,id=%s,sub=%s,typ=%s,time=%s)"
 									  event-source loanid subscriber loan_type
 									  trigger_event_time)))
 					(let [outstanding (- loaned paid)
