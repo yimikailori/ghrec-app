@@ -27,11 +27,11 @@
 					   :queue-routing-key		"sms"
 					   }
 		 }
- :sweep {:sweeper-task						1
-				 :sweeper-max-thread			100
-				 :sweeper-interval-delay 	360000
-				 :sweeper-batch-size			250
-				 }
+ :sweep {:sweeper-task				1
+		 :sweeper-max-thread		100
+		 :sweeper-interval-delay 	360000
+		 :sweeper-batch-size		250
+		 }
  :ocs {:ocs-timeout	3000
 			 :ocs-user "yimika"
 			 :ocs-pass "yimika"

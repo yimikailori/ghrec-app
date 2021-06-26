@@ -37,17 +37,22 @@
 (defn handle-recovery-request [request]
   (let [params (:params request)
         {subscriber :sub
-         amount			:amount
-         time		    :time
-         type       :type} params
+         amount		:amount
+         time	    :time
+         type       :type
+         channel    :channel} params
         _ (log/infof "Received notification params [%s]" params)]
     (if (and subscriber amount time)
       ;; Alright, we have all the stuff that we expect. Proceed.
       (utils/with-func-timed "callQueue-recharge-notification" []
                              (let [args  (json/write-str {:sub subscriber :amount amount :time time
-                                                          :attempts 0 :time-queued (System/currentTimeMillis) :type type})]
-                               (log/debugf "sendRechargeNotification(%s)" args)
-                               (async/go (rmqutils/initialize-rabbitmq (assoc @service/send-recovery-details :msg args)))
+                                                          :attempts 0 :time-queued (System/currentTimeMillis) :type type :channel channel})]
+                                 (if (= channel "E")
+                                     (log/warnf "Recovery AlertOfLendingTransaction (%s)" params)
+                                     (do
+                                         (log/debugf "sendRechargeNotification(%s)" args)
+                                         (async/go (rmqutils/initialize-rabbitmq (assoc @service/send-recovery-details :msg args)))))
+
                                  {:status 200
                                   :headers {"Content-Type" "text/plain"}
                                   :body "ok"}))

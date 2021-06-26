@@ -12,7 +12,8 @@
 			  [ghrec-acs.counters :as counters]
 			  [clj-time.core :as t]
 			  [com.climate.claypoole :as cp]
-			  [ghrec-acs.rmqutils :as rmqutils])
+			  [ghrec-acs.rmqutils :as rmqutils]
+			  [clojure.core.async :as async])
 	(:import (java.net URLDecoder)))
 
 (declare run-recovery %attempt-and-log attempt-recovery queue-recharge-notification run-cdr-recovery recharge-notifications-handler)
@@ -67,13 +68,17 @@
 (defn recharge-notifications-handler
 	[ch {:keys [delivery-tag] :as meta} ^bytes payload]
 	(let [payload (json/read-str (String. payload "UTF-8") :key-fn keyword)
-		  {:keys [sub amount time attempts time-queued type]} payload
+		  {:keys [sub amount time attempts time-queued type channel filename]} payload
 		  sub     (utils/submsisdn sub)
-		  channel (:channel @send-recovery-details)]
-		(log/debugf "[recovery consumer] payload: %s, delivery tag: %d, -> %s"
-			payload delivery-tag meta)
+		  queue-channel (:channel @send-recovery-details)]
 		(try
-			(run-cdr-recovery sub time amount (if (nil? type) :cdr (keyword type)))
+			(cond
+				(= channel "E") nil
+				(str/starts-with? filename "cbs") nil
+				:else (do
+						  (log/debugf "[recovery consumer] payload: %s, delivery tag: %d, -> %s"
+							  payload delivery-tag meta)
+						  (async/go (run-cdr-recovery sub time amount (if (nil? type) :cdr (keyword type))))))
 
 			{:action :ack :value :ack}
 			(catch Exception e
@@ -88,10 +93,10 @@
 		  msg             (if (= type :full)
 							  (format (get-in env [:recovery-messge :sms-full]) amount)
 							  (format (get-in env [:recovery-messge :sms-partial]) amount owe))
-		  sms-payload (if (not (empty? sms-sender-name))
-						  {:msisdn  subscriber :id request-id :message msg :flash? false :from sms-sender-name}
-						  {:msisdn  subscriber :id request-id :message msg :flash? false})]
-		(log/infof "sendSMS(%s,%s,%s,%s) -> %s" request-id subscriber type amount msg)
+		  sms-payload (if (empty? sms-sender-name)
+										{:msisdn  subscriber :id request-id :message msg :flash? false}
+										{:msisdn  subscriber :id request-id :message msg :flash? false :from sms-sender-name})]
+		(log/infof "sendSMS(%s,%s,%s,%s) -> %s" request-id subscriber type amount sms-payload )
 		(try
 			;(json/write-str {:sub subscriber :amount amount :time time
 			;                                                          :attempts 0 :time-queued (System/currentTimeMillis) :type type})
@@ -152,11 +157,11 @@
 											  ;(log/debug (format "NonIssueRecoveryTuples (%s)" ftuple))
 											  (recur (first rtuple) (rest rtuple) (conj result ftuple)))))))]
 				(if (empty? tuples)
-					(log/warnf "AlertOfNonLendingTransaction(%s,%s)"
+					(log/warnf "!viable candidate (%s,%s)"
 						{:sub subscriber :time trigger-time :amount trigger-amount}
 						tuples)
 					(do
-						(log/infof "AlertOfLendingTransaction (%s)" tuples)
+						(log/infof "Positive adjustment transaction (%s)" tuples)
 						(run-recovery event-source tuples nil args))))
 			(throw (Exception. (format "unknown event-source %s" event-source))))))
 
@@ -223,7 +228,7 @@
 							  (let [timestamp  (System/currentTimeMillis)
 									rand       (format "%04d" (rand-int 9999))
 									request-id (str timestamp rand)]
-								  (biginteger request-id)))]
+								  (bit-or (read-string request-id) 2)))]
 	(defn- insert-log-recovery
 		"Log recovery start into and return a new ID for the recovery transaction."
 		[recovery-method loan-id subscriber cedis_balance amount-requested]
