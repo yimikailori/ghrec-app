@@ -74,7 +74,8 @@
 		(try
 			(cond
 				(= channel "E") nil
-				(str/starts-with? filename "cbs") nil
+				(and (not (nil? filename))
+					(str/starts-with? filename "cbs")) nil
 				:else (do
 						  (log/debugf "[recovery consumer] payload: %s, delivery tag: %d, -> %s"
 							  payload delivery-tag meta)
