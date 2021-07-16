@@ -76,10 +76,11 @@
 				(= channel "E") nil
 				(and (not (nil? filename))
 					(str/starts-with? filename "cbs")) nil
-				:else (do
+				:else (let [type (if (nil? type) :cdr (keyword type))]
+						  (utils/increment-counter counters/countof-recharge-alerts type)
 						  (log/debugf "[recovery consumer] payload: %s, delivery tag: %d, -> %s"
 							  payload delivery-tag meta)
-						  (async/go (run-cdr-recovery sub time amount (if (nil? type) :cdr (keyword type))))))
+						  (async/go (run-cdr-recovery sub time amount type))))
 
 			{:action :ack :value :ack}
 			(catch Exception e
@@ -261,7 +262,7 @@
 										  {:status :failed :error-class :loan-bal-changed :need-recon? false})
 			(>= init-outstanding to-recover)
 			(let [[request-id] (insert-log-recovery event-source loan-id subscriber init-outstanding to-recover)
-				  {:keys [txnid balanceID oldbalanceamt newbalanceamt resultCode resultDesc recovered mismatch] :as debit-response }
+				  {:keys [txnid resultCode resultDesc recovered mismatch] :as debit-response }
 				  (rpc/debit-account {:request-id request-id :subscriber subscriber
 									  :loan-type  loan-type :amount to-recover :loan-id loan-id})
 				  recovery-code (when recovered
@@ -273,16 +274,12 @@
 				(cond (not (= (str txnid) (str request-id))) (do
 													 (log/errorf "OCS transactionID Expected(%s),found(%s) -> %s" request-id txnid
 														[loan-id subscriber init-outstanding to-recover true debit-response])
-													 (utils/increment-counter counters/countof-psa-failed :txnid-mismatch)
+													 (utils/increment-counter counters/countof-icc-failed :txnid-mismatch)
 													 {:status :failed :error-class :txnid-mismatch :need-recon? true})
-					(nil? mismatch) (do
-										(utils/increment-counter counters/countof-psa-failed resultCode)
-										(log/errorf "!mismatch got %s -> %s" mismatch [loan-id subscriber init-outstanding to-recover true debit-response])
-										{:status :failed :error-class resultCode :need-recon? false})
 					(true? mismatch) (do (log/errorf "OCS loanBalMismatch(loanid=%s,sub=%s,outstanding=%s,amount_requested=%s,
 					 						need-recon=%s -> %s"
 											 loan-id subscriber init-outstanding to-recover true debit-response)
-										 (utils/increment-counter counters/countof-psa-failed :mismatch)
+										 (utils/increment-counter counters/countof-icc-failed :mismatch)
 										 {:status :failed :error-class :mismatch :need-recon? true})
 
 					:else (do
@@ -291,11 +288,14 @@
 														  :error_message resultDesc})
 							  (if (= resultCode "0")
 								  (do
-									  (swap! counters/countof-psa-succeeded inc)
+									  (swap! counters/countof-icc-succeeded inc)
 									  (swap! counters/countof-recovery-attempts-succeeded inc)
 									  (swap! counters/total-recovered + recovered)
 									  ;; ---
-									  {:status :ok  :error-class :success :recovered recovered})))))
+									  {:status :ok  :error-class :success :recovered recovered})
+								  (do
+									  (utils/increment-counter counters/countof-icc-failed resultDesc)
+									  {:status :failed  :error-class resultDesc :recovered recovered})))))
 			:else (do (log/errorf "Internal loanBalChanged(id=%s,sub=%s,old=%s,new=%s)"
 						  loan-id subscriber init-outstanding to-recover)
 					  {:status :failed :error-class :loan-bal-changed :need-recon? false}))))
@@ -305,7 +305,7 @@
 (defn- attempt-recovery [event-source loaninfo & args]
 	(swap! counters/countof-recovery-attempts inc)
 	(let [counter (atom 1)]
-		(log/infof "attemptingRecovery %s" loaninfo)
+		;(log/infof "attemptingRecovery %s" loaninfo)
 		(doseq [loan-info loaninfo]
 			(log/infof "SingleLoan Processing [%s -> %s]" @counter loan-info)
 			(swap! counter inc)
@@ -321,7 +321,9 @@
 									  event-source loanid subscriber loan_type
 									  trigger_event_time)))
 					(let [outstanding (- loaned paid)
-						  {:keys [ma-balance] :as ret} (rpc/get-account-balance  loanid subscriber (t/now) outstanding)
+						  {:keys [ma-balance] :as ret} (do
+														   (swap! counters/countof-getbalance-attempts inc)
+														   (rpc/get-account-balance  loanid subscriber (t/now) outstanding))
 						  ocs-recover (fn [delta]
 										  (let [return-from-recovery (do-recover {:event-source event-source
 																				  :loan-id      loanid
@@ -345,12 +347,12 @@
 									(let [loan-balance (- loaned paid)
 										  new-balance  (- loan-balance recovered)]
 										(when (> recovered 0)
-											(let [type (condp = new-balance
+											(let [_ (swap! counters/total-recovered + recovered)
+												  type (condp = new-balance
 														   0 :full
 														   :partial)
 												  _    (log/info (format "sending recovery sms [sub=%s,amt=%s,balance=%s,loan=%s]" subscriber recovered balance loaned))]
 												(send-sms subscriber type loanid (utils/cedis recovered) (utils/cedis new-balance)))))
-									need-recon? false
 									:else (condp = error-class
 											  :txid-mismatch (log/errorf "OCS TransationID mismatch needs reconcilation %s" details)
 											  :mismatch (log/errorf "OCS balance mismatch needs reconcilation %s" details)

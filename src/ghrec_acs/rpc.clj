@@ -120,14 +120,21 @@
 								error)]
 				(log/errorf "Connection exception %s|%s" error-msg ret))
 			(let [{:keys [txnid balanceID oldbalanceamt newbalanceamt resultCode resultDesc] :as parsed-body} (parse-ocs-debit-response body)
-				  _ (log/infof "Parsed Debit Response %s, amount-debited %s" parsed-body (- (biginteger oldbalanceamt) (biginteger newbalanceamt)))]
+				  _ (log/infof "Debit Response %s" parsed-body)
+				  txnid			(if (nil? txnid) request-id txnid)
+				  oldbalanceamt (if (nil? oldbalanceamt) 0 (biginteger oldbalanceamt))
+				  newbalanceamt (if (nil? newbalanceamt) 0 (biginteger newbalanceamt))
+				  amountdebited (- (biginteger oldbalanceamt) (biginteger newbalanceamt))
+				  _ (log/infof "Debit -> subscriber %s, amount-debited %s" subscriber (- (biginteger oldbalanceamt) (biginteger newbalanceamt)))]
 				(if (= "0" (str resultCode))
 					{:request-id request-id :subscriber subscriber :amount-requested amount :txnid txnid
 					 :balanceID  balanceID :oldbalanceamt oldbalanceamt :newbalanceamt newbalanceamt
-					 :recovered  (- (biginteger oldbalanceamt) (biginteger newbalanceamt))
-					 :mismatch (if (= (biginteger amount) (- (biginteger oldbalanceamt) (biginteger newbalanceamt)))
-								   false true)
-					 :resultCode resultCode :resultDesc resultDesc}
+					 :recovered  amountdebited
+					 :mismatch (cond (= 0 amountdebited) false
+								   (= (biginteger amount) amountdebited) false
+								   :else true)
+					 :resultCode resultCode
+					 :resultDesc resultDesc}
 					(do
 						(log/errorf "!debitBalance(%s) -> %s" {:rid request-id :sub subscriber :amount-requested amount} parsed-body)
 						{:request-id request-id :subscriber subscriber :amount-requested amount :txnid txnid :recovered 0 ::mismatch nil

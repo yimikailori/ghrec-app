@@ -3,7 +3,6 @@
 		[clojure.tools.logging :as log]
 		[clojure.walk :as walk]
 		[clojure.string :as str]
-		[ghrec-acs.counters :as counters]
 		[ghrec-acs.config :refer [env]]
 		[clj-http.client :as http]
 		[clojure.data.json :as json]
@@ -50,10 +49,10 @@
 (def ^:dynamic *currency-multiplier* (int (.intValue (Math/pow (bigint 10) 2))))
 (defn increment-counter [the-atom value]
 	(swap! the-atom (fn [values amount]
-										(let [c (values amount)]
-											(if c
-												(assoc values amount (inc c))
-												(assoc values amount 1))))
+						(let [c (values amount)]
+							(if c
+								(assoc values amount (inc c))
+								(assoc values amount 1))))
 				 value))
 
 (defn rename-nil-keys [m new-name]
