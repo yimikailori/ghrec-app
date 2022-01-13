@@ -74,6 +74,7 @@
 		(try
 			(cond
 				(= channel "E") nil
+				(= channel "HSI EVENT") nil
 				(and (not (nil? filename))
 					(str/starts-with? filename "cbs")) nil
 				:else (let [type (if (nil? type) :cdr (keyword type))]
